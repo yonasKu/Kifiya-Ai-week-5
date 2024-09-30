@@ -1,199 +1,69 @@
-# import os
-# from dotenv import load_dotenv
-# from telethon import TelegramClient, events
-# import pandas as pd
-# import json
-# import nltk
-# from nltk.tokenize import word_tokenize
-# import re
-
-# # Load environment variables from .env file
-# load_dotenv()
-
-# # Fetch API ID and API Hash from environment variables
-# api_id = os.getenv('TELEGRAM_API_ID')
-# api_hash = os.getenv('TELEGRAM_API_HASH')
-
-# # Initialize the Telegram client
-# client = TelegramClient('scraper_session', api_id, api_hash)
-
-# # Set the Ethiopian-based e-commerce Telegram channel to scrape
-# channel = 'https://t.me/ZemenExpress'  # or use '@ZemenExpress'
-
-# # List to store processed messages
-# processed_data = []
-
-# # Function for preprocessing Amharic text
-# def preprocess_text(text):
-#     # Normalize text (remove extra spaces, lower case, etc.)
-#     text = re.sub(r'\s+', ' ', text).strip().lower()
-    
-#     # Tokenize the text
-#     tokens = word_tokenize(text)
-    
-#     # Further normalization can be added here if needed
-#     return tokens
-
-# # Event listener for new messages
-# @client.on(events.NewMessage(chats=channel))
-# async def handler(event):
-#     message = event.message
-    
-#     # Extract metadata and content
-#     sender_id = message.sender_id
-#     timestamp = message.date.isoformat()
-#     content = message.message
-#     media_type = None
-#     media_id = None
-
-#     # Handle media types
-#     if message.media:
-#         if hasattr(message.media, 'document'):
-#             media_type = 'document'
-#             media_id = message.media.document.id
-#         elif hasattr(message.media, 'photo'):
-#             media_type = 'photo'
-#             media_id = message.media.photo.id
-#         elif hasattr(message.media, 'video'):
-#             media_type = 'video'
-#             media_id = message.media.video.id
-
-#     # Preprocess text content
-#     preprocessed_content = preprocess_text(content) if content else []
-
-#     # Structure the message data
-#     message_data = {
-#         "sender_id": sender_id,
-#         "timestamp": timestamp,
-#         "content": preprocessed_content,
-#         "media_type": media_type,
-#         "media_id": media_id
-#     }
-    
-#     processed_data.append(message_data)
-
-#     # Save data to JSON file (you could also save to CSV or a database)
-#     file_name = 'processed_messages.json'
-#     with open(file_name, 'a', encoding='utf-8') as f:
-#         json.dump(message_data, f, ensure_ascii=False)
-#         f.write('\n')  # Append newline for each entry
-
-#     print(f"Processed new message from {sender_id} at {timestamp}")
-
-# # Start the client
-# async def main():
-#     async with client:
-#         print("Listening for new messages from @ZemenExpress...")
-#         await client.run_until_disconnected()
-
-# # Run the script
-# if __name__ == "__main__":
-#     import asyncio
-#     asyncio.run(main())
-
+from telethon import TelegramClient, types
+import csv
 import os
-import json
-import re
-import time
 from dotenv import load_dotenv
-from telethon import TelegramClient, events
-import nltk
-from nltk.tokenize import word_tokenize
-import asyncio
 
-# Ensure NLTK data is downloaded for tokenization
-nltk.download('punkt')
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Fetch API ID and API Hash from environment variables
+# Load environment variables from the .env file
+load_dotenv('.env')
 api_id = os.getenv('TELEGRAM_API_ID')
 api_hash = os.getenv('TELEGRAM_API_HASH')
 
-class TelegramScraper:
-    def __init__(self, channel):
-        self.channel = channel
-        self.client = TelegramClient('scraper_session', api_id, api_hash)
-        self.processed_data = []
+# Function to fetch messages from a single channel and write to CSV
+async def fetch_messages(client, channel_link, writer, media_dir, limit=100):
+    entity = await client.get_entity(channel_link)
+    channel_title = entity.title  # Get the channel's title
 
-        # Define where you want to store processed data
-        self.data_path = os.path.join(os.path.dirname(__file__), '..', 'notebooks', 'processed_messages.json')
-
-    async def message_handler(self, event):
-        """Handle incoming messages and extract relevant data."""
-        message = event.message
-
-        # Extract metadata and content
-        sender_id = message.sender_id
-        timestamp = message.date.isoformat()
-        content = message.message or ""
-        media_type = None
-        media_id = None
-        media_path = None
-
-        # Handle media types (image, documents, etc.)
-        if message.media:
-            media_path = await self.download_media(message)
-            if hasattr(message.media, 'document'):
-                media_type = 'document'
-                media_id = message.media.document.id
-            elif hasattr(message.media, 'photo'):
-                media_type = 'photo'
-                media_id = message.media.photo.id
-            elif hasattr(message.media, 'video'):
-                media_type = 'video'
-                media_id = message.media.video.id
-
-        # Preprocess text content
-        preprocessed_content = self.preprocess_text(content)
-
-        # Structure the message data
-        message_data = {
-            "metadata": {
-                "sender_id": sender_id,
-                "timestamp": timestamp,
-                "media_type": media_type,
-                "media_id": media_id,
-                "media_path": media_path
-            },
-            "content": preprocessed_content
-        }
-
-        self.processed_data.append(message_data)
-
-        # Save data to JSON file at the correct path
-        with open(self.data_path, 'a', encoding='utf-8') as f:
-            json.dump(message_data, f, ensure_ascii=False)
-            f.write('\n')
-
-        print(f"Processed new message from {sender_id} at {timestamp}")
-
-    async def download_media(self, message):
-        """Download media from the message and return the file path."""
+    async for message in client.iter_messages(entity, limit=limit):
         media_path = None
         if message.media:
-            media_path = await self.client.download_media(message, 'media/')
-        return media_path
+            # Handle different media types
+            if isinstance(message.media, types.MessageMediaPhoto):
+                filename = f"photo_{message.id}.jpg"
+                media_path = os.path.join(media_dir, filename)
+                await client.download_media(message.media, media_path)
+            elif isinstance(message.media, types.MessageMediaDocument):
+                filename = f"doc_{message.id}"
+                media_path = os.path.join(media_dir, filename)
+                await client.download_media(message.media, media_path)
+            elif isinstance(message.media, types.MessageMediaWebPage):
+                media_path = f"Web page URL: {message.media.webpage.url}" if message.media.webpage else "Unknown webpage"
+        
+        # Write message details to CSV
+        writer.writerow([
+            channel_title,
+            channel_link,
+            message.sender_id,
+            message.date.isoformat(),
+            message.message if message.message else '',
+            media_path if media_path else ''
+        ])
 
-    async def start_scraping_with_timeout(self, timeout_seconds=600):
-        """Start listening for new messages with a timeout mechanism."""
-        start_time = time.time()
+# Initialize the Telegram client
+client = TelegramClient('scraper_session', api_id, api_hash, timeout=60)
 
-        @self.client.on(events.NewMessage(chats=self.channel))
-        async def handler(event):
-            await self.message_handler(event)
+async def main():
+    await client.start()
 
-        async with self.client:
-            print("Listening for new messages...")
-            while time.time() - start_time < timeout_seconds:
-                await asyncio.sleep(1)  # Keep the loop alive for the timeout duration
-            
-            self.stop_scraping = True  # Set flag to stop scraping
-            print("Stopping the listener after timeout.")
-            await self.client.disconnect()  # Disconnect the client
+    # Create a directory for media files
+    media_dir = 'media'
+    os.makedirs(media_dir, exist_ok=True)
 
-# Function to run the scraper
-async def run_scraper(channel, timeout=600):
-    scraper = TelegramScraper(channel)
-    await scraper.start_scraping_with_timeout(timeout)
+    # Open the CSV file and prepare the writer
+    with open('telegram_messages.csv', 'w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        # CSV headers including channel details, sender, message, etc.
+        writer.writerow(['Channel Title', 'Channel Link', 'Sender ID', 'Timestamp', 'Message', 'Media Path'])
+        
+        # List of channels to scrape
+        channels = [
+            'https://t.me/ZemenExpress',  # Scrape from the ZemenExpress channel
+        ]
+        
+        # Fetch messages from each channel and write to the CSV
+        for channel in channels:
+            await fetch_messages(client, channel, writer, media_dir, limit=4000)
+            print(f"Finished scraping data from {channel}")
+
+# Run the main function
+with client:
+    client.loop.run_until_complete(main())
