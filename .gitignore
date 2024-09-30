@@ -2,3 +2,4 @@ myvenv
 data/*
 .env
 notebooks/media/
+photos/
